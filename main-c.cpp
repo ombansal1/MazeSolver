@@ -1,181 +1,179 @@
-// Simple Maze Solver (BFS) in C
-// Equivalent to your Python version
-
+// main.c
+// Maze solver: BFS + random/sample maze + path display
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <time.h>
 
-#define MAX_ROWS 50
-#define MAX_COLS 50
-#define INF 999999
+#define MAX 100
 
-// ---------- Maze structure ----------
 typedef struct {
-    int grid[MAX_ROWS][MAX_COLS];
-    int rows;
-    int cols;
+    int grid[MAX][MAX];
+    int rows, cols;
     int start_r, start_c;
     int end_r, end_c;
+    bool loaded;
 } Maze;
 
-// ---------- Queue for BFS ----------
 typedef struct {
     int r, c;
-} Point;
+    int dist;
+} Node;
 
-typedef struct {
-    Point data[MAX_ROWS * MAX_COLS];
-    int front, rear;
-} Queue;
+int dr[4] = {-1, 1, 0, 0};
+int dc[4] = {0, 0, -1, 1};
 
-void init_queue(Queue* q) { q->front = q->rear = 0; }
-bool empty(Queue* q) { return q->front == q->rear; }
-void enqueue(Queue* q, int r, int c) { q->data[q->rear++] = (Point){r, c}; }
-Point dequeue(Queue* q) { return q->data[q->front++]; }
+// ---------- Load a simple sample maze ----------
+void load_sample_maze(Maze *m) {
+    int data[5][5] = {
+        {0,0,0,0,1},
+        {1,1,0,1,0},
+        {0,0,0,0,0},
+        {0,1,1,1,0},
+        {0,0,0,0,0}
+    };
 
-// ---------- Maze helpers ----------
-bool in_bounds(Maze* m, int r, int c) {
-    return r >= 0 && c >= 0 && r < m->rows && c < m->cols;
+    m->rows = 5;
+    m->cols = 5;
+
+    for (int r = 0; r < m->rows; r++)
+        for (int c = 0; c < m->cols; c++)
+            m->grid[r][c] = data[r][c];
+
+    m->start_r = 0;
+    m->start_c = 0;
+    m->end_r = 4;
+    m->end_c = 4;
+    m->loaded = true;
 }
 
-bool is_wall(Maze* m, int r, int c) {
-    return m->grid[r][c] == 1;
+// ---------- Generate Random Maze ----------
+void generate_random_maze(Maze *m, int rows, int cols) {
+    m->rows = rows;
+    m->cols = cols;
+    srand((unsigned)time(NULL));
+
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            m->grid[r][c] = (rand() % 100 < 30) ? 1 : 0; // ~25% walls
+        }
+    }
+
+    m->start_r = 0; m->start_c = 0;
+    m->end_r = rows - 1; m->end_c = cols - 1;
+    m->grid[m->start_r][m->start_c] = 0;
+    m->grid[m->end_r][m->end_c] = 0;
+    m->loaded = true;
 }
 
-void show_maze(Maze* m, bool path[MAX_ROWS][MAX_COLS]) {
+// ---------- Show Maze (optionally with path) ----------
+void show_maze(Maze *m, bool path[MAX][MAX]) {
+    if (!m->loaded) { printf("No maze loaded.\n"); return; }
+    printf("\nMaze (%dx%d):\n", m->rows, m->cols);
     for (int r = 0; r < m->rows; r++) {
         for (int c = 0; c < m->cols; c++) {
             if (r == m->start_r && c == m->start_c) printf("S ");
             else if (r == m->end_r && c == m->end_c) printf("E ");
-            else if (is_wall(m, r, c)) printf("# ");
-            else if (path[r][c]) printf("* ");
+            else if (path != NULL && path[r][c]) printf("* ");
+            else if (m->grid[r][c] == 1) printf("# ");
             else printf(". ");
         }
         printf("\n");
     }
 }
 
-// ---------- BFS Solver ----------
-int solve_bfs(Maze* m, bool path[MAX_ROWS][MAX_COLS]) {
-    bool visited[MAX_ROWS][MAX_COLS] = {false};
-    Point prev[MAX_ROWS][MAX_COLS];
-    Queue q;
-    init_queue(&q);
+// ---------- BFS Solver with path reconstruction ----------
+void solve_bfs(Maze *m) {
+    if (!m->loaded) { printf("Load or generate a maze first.\n"); return; }
 
-    enqueue(&q, m->start_r, m->start_c);
+    bool visited[MAX][MAX] = {false};
+    int prev_r[MAX][MAX], prev_c[MAX][MAX];
+    for (int i=0;i<m->rows;i++) for (int j=0;j<m->cols;j++){ prev_r[i][j] = prev_c[i][j] = -1; }
+
+    Node queue[MAX * MAX];
+    int front = 0, rear = 0;
+
+    queue[rear++] = (Node){m->start_r, m->start_c, 0};
     visited[m->start_r][m->start_c] = true;
 
-    int dirs[4][2] = {{-1,0},{1,0},{0,-1},{0,1}};
     bool found = false;
-
-    while (!empty(&q)) {
-        Point cur = dequeue(&q);
+    while (front < rear) {
+        Node cur = queue[front++];
         if (cur.r == m->end_r && cur.c == m->end_c) {
+            // reconstruct path
+            bool path[MAX][MAX] = {false};
+            int cr = cur.r, cc = cur.c;
+            while (!(cr == m->start_r && cc == m->start_c)) {
+                path[cr][cc] = true;
+                int pr = prev_r[cr][cc];
+                int pc = prev_c[cr][cc];
+                cr = pr; cc = pc;
+            }
+            path[m->start_r][m->start_c] = true;
+            printf("Shortest path length: %d steps.\n", cur.dist);
+            show_maze(m, path);
             found = true;
             break;
         }
 
-        for (int i = 0; i < 4; i++) {
-            int nr = cur.r + dirs[i][0];
-            int nc = cur.c + dirs[i][1];
-            if (in_bounds(m, nr, nc) && !visited[nr][nc] && !is_wall(m, nr, nc)) {
+        for (int k = 0; k < 4; k++) {
+            int nr = cur.r + dr[k];
+            int nc = cur.c + dc[k];
+            if (nr >= 0 && nr < m->rows && nc >= 0 && nc < m->cols &&
+                !visited[nr][nc] && m->grid[nr][nc] == 0) {
                 visited[nr][nc] = true;
-                prev[nr][nc] = cur;
-                enqueue(&q, nr, nc);
+                prev_r[nr][nc] = cur.r;
+                prev_c[nr][nc] = cur.c;
+                queue[rear++] = (Node){nr, nc, cur.dist + 1};
             }
         }
     }
 
-    if (!found) return INF;
-
-    // reconstruct path
-    for (int r = 0; r < m->rows; r++)
-        for (int c = 0; c < m->cols; c++)
-            path[r][c] = false;
-
-    int dist = 0;
-    Point cur = {m->end_r, m->end_c};
-    while (!(cur.r == m->start_r && cur.c == m->start_c)) {
-        path[cur.r][cur.c] = true;
-        Point p = prev[cur.r][cur.c];
-        cur = p;
-        dist++;
+    if (!found) {
+        printf("No path found!\n");
+        show_maze(m, NULL);
     }
-    path[m->start_r][m->start_c] = true;
-
-    return dist;
 }
 
-// ---------- Load sample maze ----------
-void load_sample_maze(Maze* m) {
-    int sample[6][8] = {
-        {0,0,0,0,1,0,0,0},
-        {1,1,0,1,1,0,1,0},
-        {0,0,0,0,0,0,1,0},
-        {0,1,1,1,0,1,0,0},
-        {0,0,0,1,0,0,0,1},
-        {1,1,0,0,0,1,0,0}
-    };
-    m->rows = 6;
-    m->cols = 8;
-    for (int r = 0; r < m->rows; r++)
-        for (int c = 0; c < m->cols; c++)
-            m->grid[r][c] = sample[r][c];
-
-    m->start_r = 0; m->start_c = 0;
-    m->end_r = 5;   m->end_c = 7;
-}
-
-// ---------- Menu ----------
-void menu() {
-    printf("\n=== Maze Solver (BFS) ===\n");
-    printf("1. Load sample maze\n");
-    printf("2. Show maze\n");
-    printf("3. Solve (BFS shortest path)\n");
-    printf("0. Exit\n");
-}
-
-// ---------- Main ----------
-int main() {
-    Maze maze = {0};
-    bool path[MAX_ROWS][MAX_COLS] = {false};
-    int choice;
+int main(void) {
+    Maze maze; maze.loaded = false;
 
     while (1) {
-        menu();
-        printf("Choose an option: ");
-        scanf("%d", &choice);
+        printf("\n==== Maze Solver ====\n");
+        printf("1. Load sample maze\n");
+        printf("2. Generate random maze\n");
+        printf("3. Show maze\n");
+        printf("4. Solve using BFS (show path)\n");
+        printf("5. Exit\n");
+        printf("Enter your choice: ");
+
+        int choice;
+        if (scanf("%d", &choice) != 1) {
+            while (getchar() != '\n'); // flush
+            printf("Invalid input. Try again.\n");
+            continue;
+        }
 
         if (choice == 1) {
             load_sample_maze(&maze);
             printf("Sample maze loaded.\n");
-        } 
-        else if (choice == 2) {
-            if (maze.rows == 0) printf("Maze not loaded.\n");
-            else show_maze(&maze, path);
-        }
-        else if (choice == 3) {
-            if (maze.rows == 0) {
-                printf("Load a maze first.\n");
-                continue;
-            }
-            int dist = solve_bfs(&maze, path);
-            if (dist == INF) {
-                printf("No path found.\n");
-            } else {
-                printf("Shortest path length: %d steps\n", dist);
-                show_maze(&maze, path);
-            }
-        } 
-        else if (choice == 0) {
-            printf("Goodbye!\n");
+        } else if (choice == 2) {
+            int r, c;
+            printf("Enter number of rows: "); scanf("%d", &r);
+            printf("Enter number of columns: "); scanf("%d", &c);
+            generate_random_maze(&maze, r, c);
+            printf("Random maze (%dx%d) generated!\n", r, c);
+        } else if (choice == 3) {
+            show_maze(&maze, NULL);
+        } else if (choice == 4) {
+            solve_bfs(&maze);
+        } else if (choice == 5) {
+            printf("Exiting...\n");
             break;
-        } 
-        else {
-            printf("Invalid choice.\n");
+        } else {
+            printf("Invalid choice. Try again.\n");
         }
     }
-
     return 0;
 }
 
